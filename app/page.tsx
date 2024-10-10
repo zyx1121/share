@@ -1,18 +1,17 @@
 'use client'
 
-import { useState, ChangeEvent, DragEvent, useCallback, useEffect, useRef } from 'react';
-import { Button } from "@/components/ui/button";
+import { useState, DragEvent, useCallback, useEffect, useRef } from 'react';
 import { Input } from "@/components/ui/input";
 import { FiUpload, FiDownload } from 'react-icons/fi';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast"
 
 export default function UploadPage() {
-  const [file, setFile] = useState<File | null>(null);
+  const [, setFile] = useState<File | null>(null);
   const [uploadCode, setUploadCode] = useState<string>('');
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [, setUploadProgress] = useState<number>(0);
   const [downloadCode, setDownloadCode] = useState<string>('');
-  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [, setIsUploading] = useState<boolean>(false);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [showSuccessDialog, setShowSuccessDialog] = useState<boolean>(false);
   const [isDownloadDialogOpen, setIsDownloadDialogOpen] = useState(false);
@@ -22,6 +21,107 @@ export default function UploadPage() {
   const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB per chunk
 
   const [isDownloading, setIsDownloading] = useState(false);
+
+  const uploadChunk = useCallback(async (file: File, chunkIndex: number, chunkData: Blob) => {
+    const formData = new FormData();
+    formData.append('chunk', chunkData);
+    formData.append('chunkIndex', chunkIndex.toString());
+    formData.append('fileName', file.name);
+
+    const response = await fetch('/api/upload-chunk', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`上傳分塊 ${chunkIndex + 1} 失敗: ${errorData.error || response.statusText}`);
+    }
+
+    return response.json();
+  }, []); // 空依賴數組，因為這個函數不依賴於任何外部變量
+
+  const handleUpload = useCallback(async (fileToUpload: File) => {
+    if (!fileToUpload) {
+      toast({
+        variant: "destructive",
+        title: "錯誤",
+        description: "請先選擇一個檔案。",
+        duration: 5000,
+      });
+      return;
+    }
+    setIsUploading(true);
+    setUploadCode('');
+    setUploadProgress(0);
+
+    const uploadToast = toast({
+      title: "上傳開始",
+      description: "準備上傳文件...",
+      duration: Infinity,
+    });
+
+    const totalChunks = Math.ceil(fileToUpload.size / CHUNK_SIZE);
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkStart = i * CHUNK_SIZE;
+      const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, fileToUpload.size);
+      const chunkData = fileToUpload.slice(chunkStart, chunkEnd);
+
+      try {
+        await uploadChunk(fileToUpload, i, chunkData);
+        const progress = ((i + 1) / totalChunks) * 100;
+        setUploadProgress(progress);
+
+        // 更新 toast 顯示上傳進度
+        toast({
+          id: uploadToast.id,
+          title: "上傳中",
+          description: `上傳進度：${progress.toFixed(2)}%`,
+          duration: Infinity,
+        });
+      } catch (error) {
+        console.error('Error uploading chunk:', error);
+        toast({
+          id: uploadToast.id,
+          variant: "destructive",
+          title: "上傳失敗",
+          description: error instanceof Error ? error.message : "上傳過程中發生未知錯誤，請稍後再試",
+          duration: 5000,
+        });
+        setIsUploading(false);
+        return;
+      }
+    }
+
+    // 所有分塊上傳完成後，請求伺服器合併檔案
+    try {
+      const response = await fetch(`/api/merge-file?fileName=${fileToUpload.name}`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+      setUploadCode(data.code);
+      setIsUploading(false);
+      setShowSuccessDialog(true);
+
+      // 更新 toast 顯示上傳完成
+      toast({
+        id: uploadToast.id,
+        title: "上傳完成",
+        description: "文件已成功上傳",
+        duration: 5000,
+      });
+    } catch (error) {
+      console.error('Error merging file:', error);
+      toast({
+        id: uploadToast.id,
+        variant: "destructive",
+        title: "上傳失敗",
+        description: "合併文件時發生錯誤，請稍後再試",
+        duration: 5000,
+      });
+      setIsUploading(false);
+    }
+  }, [toast, setIsUploading, setUploadCode, setUploadProgress, uploadChunk, CHUNK_SIZE]);
 
   const handleFileChange = useCallback((selectedFile: File | undefined) => {
     if (!selectedFile) {
@@ -33,7 +133,7 @@ export default function UploadPage() {
         variant: "destructive",
         title: "錯誤",
         description: "請選擇檔案，不要選擇資料夾。",
-        duration: 5000, // 5秒後自動消失
+        duration: 5000,
       });
       return;
     }
@@ -43,7 +143,7 @@ export default function UploadPage() {
         variant: "destructive",
         title: "錯誤",
         description: "請不要上傳空檔案。",
-        duration: 5000, // 5秒後自動消失
+        duration: 5000,
       });
       return;
     }
@@ -52,25 +152,7 @@ export default function UploadPage() {
     setUploadCode('');
     setUploadProgress(0);
     handleUpload(selectedFile);
-  }, [toast]);
-
-  const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragging(false);
-    if (event.dataTransfer.files && event.dataTransfer.files[0]) {
-      handleFileChange(event.dataTransfer.files[0]);
-    }
-  }, [handleFileChange]);
-
-  const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragging(true);
-  }, []);
-
-  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragging(false);
-  }, []);
+  }, [toast, setFile, setUploadCode, setUploadProgress, handleUpload]);
 
   useEffect(() => {
     const handleGlobalDrop = (event: DragEvent) => {
@@ -122,108 +204,6 @@ export default function UploadPage() {
     cleanup();
   }, []);
 
-  const uploadChunk = async (file: File, chunkIndex: number, chunkData: Blob, totalChunks: number) => {
-    const formData = new FormData();
-    formData.append('chunk', chunkData);
-    formData.append('chunkIndex', chunkIndex.toString());
-    formData.append('totalChunks', totalChunks.toString());
-    formData.append('fileName', file.name);
-
-    const response = await fetch('/api/upload-chunk', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (response.ok) {
-      setUploadProgress(((chunkIndex + 1) / totalChunks) * 100);
-    } else {
-      throw new Error('Chunk upload failed');
-    }
-  };
-
-  const handleUpload = async (fileToUpload: File) => {
-    if (!fileToUpload) {
-      toast({
-        variant: "destructive",
-        title: "錯誤",
-        description: "請先選擇一個檔案。",
-        duration: 5000,
-      });
-      return;
-    }
-
-    setIsUploading(true);
-    setUploadCode('');
-    setUploadProgress(0);
-
-    const uploadToast = toast({
-      title: "上傳開始",
-      description: "準備上傳文件...",
-      duration: Infinity,
-    });
-
-    const totalChunks = Math.ceil(fileToUpload.size / CHUNK_SIZE);
-    for (let i = 0; i < totalChunks; i++) {
-      const chunkStart = i * CHUNK_SIZE;
-      const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, fileToUpload.size);
-      const chunkData = fileToUpload.slice(chunkStart, chunkEnd);
-
-      try {
-        await uploadChunk(fileToUpload, i, chunkData, totalChunks);
-        const progress = ((i + 1) / totalChunks) * 100;
-        setUploadProgress(progress);
-
-        // 更新 toast 顯示上傳進度
-        toast({
-          id: uploadToast.id,
-          title: "上傳中",
-          description: `上傳進度：${progress.toFixed(2)}%`,
-          duration: Infinity,
-        });
-      } catch (error) {
-        console.error('Error uploading chunk:', error);
-        toast({
-          id: uploadToast.id,
-          variant: "destructive",
-          title: "上傳失敗",
-          description: "上傳過程中發生錯誤，請稍後再試",
-          duration: 5000,
-        });
-        setIsUploading(false);
-        return;
-      }
-    }
-
-    // 所有分塊上���完成後，請求伺服器合併檔案
-    try {
-      const response = await fetch(`/api/merge-file?fileName=${fileToUpload.name}`, {
-        method: 'POST',
-      });
-      const data = await response.json();
-      setUploadCode(data.code);
-      setIsUploading(false);
-      setShowSuccessDialog(true);
-
-      // 更新 toast 顯示上傳完成
-      toast({
-        id: uploadToast.id,
-        title: "上傳完成",
-        description: "文件已成功上傳",
-        duration: 5000,
-      });
-    } catch (error) {
-      console.error('Error merging file:', error);
-      toast({
-        id: uploadToast.id,
-        variant: "destructive",
-        title: "上傳失敗",
-        description: "合併文件時發生錯誤，請稍後再試",
-        duration: 5000,
-      });
-      setIsUploading(false);
-    }
-  };
-
   const handleDownload = async () => {
     if (!downloadCode) {
       toast({
@@ -241,7 +221,7 @@ export default function UploadPage() {
     const downloadToast = toast({
       title: "準備下載",
       description: "正在準備您的文件...",
-      duration: Infinity, // 保持通知��到我們更新或關閉它
+      duration: Infinity, // 保持通知到我們更新或關閉它
     });
 
     try {
@@ -282,7 +262,7 @@ export default function UploadPage() {
           duration: 5000,
         });
       } else {
-        // 更新���知為下載失敗
+        // 更新知為下載失敗
         toast({
           id: downloadToast.id,
           variant: "destructive",
@@ -318,7 +298,7 @@ export default function UploadPage() {
           });
         })
         .catch(err => {
-          console.error('無法複製到剪貼板:', err);
+          console.error('無法複製到��貼板:', err);
           toast({
             variant: "destructive",
             title: "複製失敗",

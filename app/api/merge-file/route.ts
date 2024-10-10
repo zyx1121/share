@@ -3,11 +3,6 @@ import { promises as fs } from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 
-// 生成 6 位數字代碼的函數
-function generateSixDigitCode(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
 // 更新代碼映射的函數
 async function updateCodeMap(code: string, fileName: string) {
     const codeMapPath = path.join(process.cwd(), 'uploads', 'code_map.json');
@@ -15,7 +10,7 @@ async function updateCodeMap(code: string, fileName: string) {
     try {
         const data = await fs.readFile(codeMapPath, 'utf-8');
         codeMap = JSON.parse(data);
-    } catch (error) {
+    } catch {
         // 如果文件不存在，我們將創建一個新的
     }
     codeMap[code] = { fileName, createdAt: Date.now() };
@@ -33,7 +28,7 @@ export async function POST(req: NextRequest) {
     // 確保 uploads 目錄存在
     try {
         await fs.access(chunkDir);
-    } catch (error) {
+    } catch {
         await fs.mkdir(chunkDir, { recursive: true });
     }
 

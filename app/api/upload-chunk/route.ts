@@ -2,37 +2,39 @@ import { promises as fs } from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 
-export const config = {
-    api: {
-        bodyParser: false,
-    },
-};
+// 移除 Edge Runtime 配置
+// export const runtime = 'edge'
 
 export async function POST(req: NextRequest) {
-    const chunkDir = path.join(process.cwd(), 'uploads');
-
-    // 確保 uploads 目錄存在
-    try {
-        await fs.access(chunkDir);
-    } catch (error) {
-        await fs.mkdir(chunkDir, { recursive: true });
-    }
-
     const formData = await req.formData();
     const chunk = formData.get('chunk') as Blob;
-    const chunkIndex = parseInt(formData.get('chunkIndex') as string, 10);
+    const chunkIndex = formData.get('chunkIndex') as string;
     const fileName = formData.get('fileName') as string;
 
-    // 檢查 chunk 是否為空
     if (chunk.size === 0) {
         return NextResponse.json({ error: '不能上傳空的檔案分塊' }, { status: 400 });
     }
 
-    const chunkFilePath = path.join(chunkDir, `${fileName}_chunk-${chunkIndex}`);
-    const arrayBuffer = await chunk.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    const chunkFileName = `${fileName}_chunk-${chunkIndex}`;
+    const chunkPath = path.join(uploadsDir, chunkFileName);
 
-    await fs.writeFile(chunkFilePath, buffer);
+    try {
+        // 確保上傳目錄存在
+        await fs.mkdir(uploadsDir, { recursive: true });
 
-    return NextResponse.json({ message: '分塊上傳成功' });
+        // 將分塊寫入文件
+        const buffer = Buffer.from(await chunk.arrayBuffer());
+        await fs.writeFile(chunkPath, buffer);
+
+        return NextResponse.json({
+            message: '分塊上傳成功',
+            chunkIndex,
+            fileName,
+            size: chunk.size
+        });
+    } catch (error) {
+        console.error('保存分塊時出錯:', error);
+        return NextResponse.json({ error: '保存分塊時出錯' }, { status: 500 });
+    }
 }

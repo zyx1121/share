@@ -8,7 +8,7 @@ async function readCodeMap(): Promise<Record<string, { fileName: string, created
     try {
         const data = await fs.readFile(codeMapPath, 'utf-8');
         return JSON.parse(data);
-    } catch (error) {
+    } catch {
         return {};
     }
 }
@@ -32,7 +32,16 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
         const fileStats = await fs.stat(filePath);
         const fileStream = createReadStream(filePath);
 
-        return new NextResponse(fileStream as any, {
+        // 將 fileStream 轉換為 ReadableStream
+        const readableStream = new ReadableStream({
+            start(controller) {
+                fileStream.on('data', (chunk) => controller.enqueue(chunk));
+                fileStream.on('end', () => controller.close());
+                fileStream.on('error', (err) => controller.error(err));
+            },
+        });
+
+        return new NextResponse(readableStream, {
             headers: {
                 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileInfo.fileName)}`,
                 'Content-Type': 'application/octet-stream',

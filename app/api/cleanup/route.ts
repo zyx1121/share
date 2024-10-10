@@ -7,7 +7,7 @@ async function readCodeMap(): Promise<Record<string, { fileName: string, created
     try {
         const data = await fs.readFile(codeMapPath, 'utf-8');
         return JSON.parse(data);
-    } catch (error) {
+    } catch {
         return {};
     }
 }
