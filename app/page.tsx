@@ -28,18 +28,24 @@ export default function UploadPage() {
     formData.append('chunkIndex', chunkIndex.toString());
     formData.append('fileName', file.name);
 
-    const response = await fetch('/api/upload-chunk', {
-      method: 'POST',
-      body: formData,
-    });
+    try {
+      const response = await fetch('/api/upload-chunk', {
+        method: 'POST',
+        body: formData,
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`上傳分塊 ${chunkIndex + 1} 失敗: ${errorData.error || response.statusText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server response:', errorText);
+        throw new Error(`上傳分塊 ${chunkIndex + 1} 失敗: ${response.statusText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error('Error uploading chunk:', error);
+      throw error;
     }
-
-    return response.json();
-  }, []); // 空依賴數組，因為這個函數不依賴於任何外部變量
+  }, []);
 
   const handleUpload = useCallback(async (fileToUpload: File) => {
     if (!fileToUpload) {
@@ -298,7 +304,7 @@ export default function UploadPage() {
           });
         })
         .catch(err => {
-          console.error('無法複製到��貼板:', err);
+          console.error('無法複製到貼板:', err);
           toast({
             variant: "destructive",
             title: "複製失敗",
